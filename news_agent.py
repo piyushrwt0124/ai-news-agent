@@ -16,6 +16,7 @@ from openai import OpenAI
 
 BASE_DIR = Path(__file__).resolve().parent
 STYLES_PATH = BASE_DIR / "static" / "styles.css"
+COVER_IMAGE_PATH = BASE_DIR / "IMG-20250124-WA0011.jpg"
 
 load_dotenv()
 
@@ -668,8 +669,12 @@ def render_home(payload: Dict, selected_category: str = "all", search: str = "")
 <body>
   <div class="page-shell">
     <header class="hero">
+      <div class="hero-media" aria-hidden="true">
+        <img src="/static/cover-photo.jpg" alt="" />
+      </div>
+      <div class="hero-overlay"></div>
       <nav class="topbar">
-        <span class="brand">World Current Affairs Pulse</span>
+        <span class="brand">Neelgiri House</span>
         <div class="topbar-actions">
           <a class="mini-link" href="#briefing">Briefing</a>
           <a class="mini-link" href="#method">Method</a>
@@ -677,9 +682,9 @@ def render_home(payload: Dict, selected_category: str = "all", search: str = "")
         </div>
       </nav>
       <div class="hero-copy">
-        <p class="eyebrow">Global affairs, explained for impact</p>
-        <h1>Track geopolitics, technology, education, and economics with a clear India lens.</h1>
-        <p class="hero-text">Each story highlights what happened, what likely caused it, how India is affected, what it means for other major countries, and how everyday citizens may feel the impact.</p>
+        <p class="eyebrow">Student leadership and public purpose</p>
+        <h1>Initiative of Neelgiri House</h1>
+        <p class="hero-text">A student-led platform that pairs community spirit with clear, high-context news briefings so readers can understand what happened, why it matters, and how it affects everyday life.</p>
       </div>
       <div class="quick-nav">
         {category_links}
@@ -732,6 +737,9 @@ class NewsRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/static/styles.css":
             self.serve_styles()
             return
+        if parsed.path == "/static/cover-photo.jpg":
+            self.serve_cover_image()
+            return
 
         if parsed.path != "/":
             self.send_error(404, "Page not found")
@@ -758,6 +766,18 @@ class NewsRequestHandler(BaseHTTPRequestHandler):
         body = STYLES_PATH.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "text/css; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def serve_cover_image(self) -> None:
+        if not COVER_IMAGE_PATH.exists():
+            self.send_error(404, "Cover image missing")
+            return
+
+        body = COVER_IMAGE_PATH.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
