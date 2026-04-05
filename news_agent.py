@@ -20,13 +20,17 @@ STYLES_PATH = BASE_DIR / "static" / "styles.css"
 load_dotenv()
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
+GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-8b-8192").strip()
+NEWS_PROVIDER = os.getenv("NEWS_PROVIDER", "newsapi").strip().lower()
 HOST = os.getenv("HOST", "0.0.0.0").strip()
 PORT = int(os.getenv("PORT", "8000"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "900"))
+AUTO_REFRESH_SECONDS = int(os.getenv("AUTO_REFRESH_SECONDS", "0"))
 
 NEWS_ENDPOINT = "https://newsapi.org/v2/everything"
+GNEWS_ENDPOINT = "https://gnews.io/api/v4/search"
 
 CATEGORY_QUERIES = OrderedDict(
     [
@@ -140,10 +144,25 @@ def clean_text(value: str, fallback: str = "No summary available.") -> str:
     return value
 
 
-def fetch_news_for_category(category: str, query: str, page_size: int = 6) -> List[Dict]:
+def parse_timestamp(value: str) -> str:
+    value = clean_text(value, "Unknown time")
+    if value == "Unknown time":
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%d %b %Y, %H:%M UTC")
+    except ValueError:
+        return value
+
+
+def active_news_provider() -> str:
+    if NEWS_PROVIDER == "gnews" and GNEWS_API_KEY:
+        return "gnews"
+    return "newsapi"
+
+
+def fetch_newsapi_news(category: str, query: str, page_size: int) -> List[Dict]:
     if not NEWS_API_KEY:
         return []
-
     from_date = (datetime.now(timezone.utc) - timedelta(days=4)).date().isoformat()
     params = {
         "q": query,
@@ -156,25 +175,52 @@ def fetch_news_for_category(category: str, query: str, page_size: int = 6) -> Li
     response = requests.get(NEWS_ENDPOINT, params=params, timeout=20)
     response.raise_for_status()
     data = response.json()
+    return [
+        {
+            "category": category,
+            "title": clean_text(article.get("title"), ""),
+            "description": clean_text(article.get("description"), ""),
+            "url": clean_text(article.get("url"), "#"),
+            "source": clean_text(article.get("source", {}).get("name"), "Unknown source"),
+            "published_at": parse_timestamp(article.get("publishedAt")),
+        }
+        for article in data.get("articles", [])
+        if clean_text(article.get("title"), "") and clean_text(article.get("url"), "#") != "#"
+    ]
 
-    articles = []
-    for article in data.get("articles", []):
-        title = clean_text(article.get("title"), "")
-        description = clean_text(article.get("description"), "")
-        url = clean_text(article.get("url"), "#")
-        if not title or url == "#":
-            continue
-        articles.append(
-            {
-                "category": category,
-                "title": title,
-                "description": description,
-                "url": url,
-                "source": clean_text(article.get("source", {}).get("name"), "Unknown source"),
-                "published_at": clean_text(article.get("publishedAt"), "Unknown time"),
-            }
-        )
-    return articles
+
+def fetch_gnews_news(category: str, query: str, page_size: int) -> List[Dict]:
+    if not GNEWS_API_KEY:
+        return []
+    params = {
+        "q": query,
+        "lang": "en",
+        "sortby": "publishedAt",
+        "max": min(page_size, 10),
+        "apikey": GNEWS_API_KEY,
+    }
+    response = requests.get(GNEWS_ENDPOINT, params=params, timeout=20)
+    response.raise_for_status()
+    data = response.json()
+    return [
+        {
+            "category": category,
+            "title": clean_text(article.get("title"), ""),
+            "description": clean_text(article.get("description"), ""),
+            "url": clean_text(article.get("url"), "#"),
+            "source": clean_text(article.get("source", {}).get("name"), "Unknown source"),
+            "published_at": parse_timestamp(article.get("publishedAt")),
+        }
+        for article in data.get("articles", [])
+        if clean_text(article.get("title"), "") and clean_text(article.get("url"), "#") != "#"
+    ]
+
+
+def fetch_news_for_category(category: str, query: str, page_size: int = 6) -> List[Dict]:
+    provider = active_news_provider()
+    if provider == "gnews":
+        return fetch_gnews_news(category, query, page_size)
+    return fetch_newsapi_news(category, query, page_size)
 
 
 def fetch_all_news() -> List[Dict]:
@@ -341,6 +387,30 @@ def build_global_snapshot(groups: Dict[str, List[Dict]]) -> List[Dict]:
             }
         )
     return snapshot
+
+
+def filter_groups(groups: Dict[str, List[Dict]], category: str, search: str) -> OrderedDict:
+    normalized_category = category.strip().lower()
+    normalized_search = search.strip().lower()
+    filtered = OrderedDict()
+
+    for group_name, items in groups.items():
+        if normalized_category and normalized_category != "all" and group_name.lower() != normalized_category:
+            continue
+
+        scoped_items = items
+        if normalized_search:
+            scoped_items = [
+                item
+                for item in items
+                if normalized_search in item["title"].lower()
+                or normalized_search in item["summary"].lower()
+                or normalized_search in item["cause"].lower()
+                or normalized_search in item["impact_india"].lower()
+            ]
+        filtered[group_name] = scoped_items
+
+    return filtered
 
 
 def build_payload(force_refresh: bool = False) -> Dict:
@@ -511,9 +581,41 @@ def render_explainer_panel() -> str:
     """
 
 
-def render_home(payload: Dict) -> str:
+def render_filter_bar(selected_category: str, search: str) -> str:
+    options = ['<option value="all">All categories</option>']
+    for category in CATEGORY_QUERIES.keys():
+        selected = ' selected' if category.lower() == selected_category.lower() else ""
+        options.append(f'<option value="{escape(category, quote=True)}"{selected}>{escape(category)}</option>')
+
+    return f"""
+    <section class="filter-panel">
+      <form class="filter-form" method="get" action="/">
+        <label>
+          <span>Category</span>
+          <select name="category">
+            {''.join(options)}
+          </select>
+        </label>
+        <label class="search-field">
+          <span>Search</span>
+          <input type="text" name="search" value="{escape(search, quote=True)}" placeholder="India, AI, sanctions, inflation..." />
+        </label>
+        <div class="filter-actions">
+          <button type="submit">Apply</button>
+          <a href="/">Reset</a>
+        </div>
+      </form>
+    </section>
+    """
+
+
+def render_home(payload: Dict, selected_category: str = "all", search: str = "") -> str:
+    visible_groups = filter_groups(payload["groups"], selected_category, search)
+    visible_snapshot = build_global_snapshot(visible_groups)
+    visible_highlights = build_highlights(visible_groups)
+    filtered_payload = {**payload, "groups": visible_groups, "snapshot": visible_snapshot, "highlights": visible_highlights}
     sections = []
-    for category, items in payload["groups"].items():
+    for category, items in visible_groups.items():
         cards = "".join(render_story_card(item) for item in items)
         section_body = cards or '<div class="empty-state">No fresh stories were available for this section.</div>'
         audience = CATEGORY_QUERIES.get(category, {}).get("audience", "")
@@ -544,7 +646,12 @@ def render_home(payload: Dict) -> str:
     refresh_query = urlencode({"refresh": "1"})
     category_links = "".join(
         f'<a href="#{escape(category.lower().replace(" ", "-"), quote=True)}">{escape(category)}</a>'
-        for category in payload["groups"].keys()
+        for category in visible_groups.keys()
+    )
+    auto_refresh_tag = (
+        f'<meta http-equiv="refresh" content="{AUTO_REFRESH_SECONDS}">'
+        if AUTO_REFRESH_SECONDS > 0
+        else ""
     )
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -552,6 +659,7 @@ def render_home(payload: Dict) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>World Current Affairs Pulse</title>
+  {auto_refresh_tag}
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -589,13 +697,18 @@ def render_home(payload: Dict) -> str:
           <span class="stat-label">Mode</span>
           <strong>{status_badge}</strong>
         </div>
+        <div>
+          <span class="stat-label">Provider</span>
+          <strong>{escape(active_news_provider().upper())}</strong>
+        </div>
       </div>
     </header>
 
     {notice}
 
     <main class="content-stack" id="briefing">
-      {render_feature_panel(payload)}
+      {render_filter_bar(selected_category, search)}
+      {render_feature_panel(filtered_payload)}
       {render_explainer_panel()}
       {''.join(sections)}
     </main>
@@ -626,8 +739,10 @@ class NewsRequestHandler(BaseHTTPRequestHandler):
 
         query = parse_qs(parsed.query)
         force_refresh = query.get("refresh") == ["1"]
+        selected_category = query.get("category", ["all"])[0]
+        search = query.get("search", [""])[0]
         payload = build_payload(force_refresh=force_refresh)
-        body = render_home(payload).encode("utf-8")
+        body = render_home(payload, selected_category=selected_category, search=search).encode("utf-8")
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

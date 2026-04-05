@@ -48,7 +48,9 @@ body {
 .quick-nav,
 .highlight-grid,
 .snapshot-list,
-.explainer-grid {
+.explainer-grid,
+.filter-form,
+.filter-actions {
   display: flex;
   gap: 14px;
 }
@@ -226,12 +228,70 @@ body {
 .feature-panel,
 .snapshot-panel,
 .explainer-card,
+.filter-panel,
 .site-footer {
   padding: 22px;
   border: 1px solid var(--line);
   border-radius: 24px;
   background: rgba(255, 250, 242, 0.76);
   box-shadow: 0 14px 40px rgba(20, 33, 61, 0.08);
+}
+
+.filter-form {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.filter-form label {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.filter-form span {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.filter-form input,
+.filter-form select,
+.filter-actions button,
+.filter-actions a {
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(20, 33, 61, 0.12);
+  background: #fffdf9;
+  font: inherit;
+  text-decoration: none;
+}
+
+.search-field {
+  flex: 1 1 320px;
+}
+
+.filter-form input,
+.filter-form select {
+  width: 100%;
+}
+
+.filter-actions {
+  align-items: center;
+}
+
+.filter-actions button {
+  background: var(--ink);
+  color: #fff;
+  cursor: pointer;
+}
+
+.filter-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
 }
 
 .feature-heading h2,

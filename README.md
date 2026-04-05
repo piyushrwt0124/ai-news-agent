@@ -22,6 +22,7 @@ Create a `.env` file with:
 
 ```env
 NEWS_API_KEY=your_newsapi_key
+GNEWS_API_KEY=your_gnews_key
 GROQ_API_KEY=your_groq_key
 ```
 
@@ -29,9 +30,11 @@ Optional:
 
 ```env
 GROQ_MODEL=llama3-8b-8192
+NEWS_PROVIDER=newsapi
 PORT=8000
 HOST=0.0.0.0
 CACHE_TTL_SECONDS=900
+AUTO_REFRESH_SECONDS=0
 ```
 
 ## Deploy on Render
